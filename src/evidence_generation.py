@@ -166,6 +166,12 @@ class EvidenceGenerator:
                     image_id = id // 10 - 1
                     ris_id = id % 10
                     img = retrieval_result.images[image_id][ris_id]
+
+                    if (
+                        evidence.answer
+                        == "Yes. Multiple sources report that dozens of Palestinian children were killed in Gaza in various rounds of conflict with Israel."
+                    ):
+                        print(id, image_id, ris_id, img)
                     evidence.url = img["url"]
                     evidence.scraped_text = img["title"]
                     evidence.images = [jpg_to_base64(img["thumbnailUrl"])]
@@ -178,7 +184,8 @@ class EvidenceGenerator:
                             retrieval_result[id].metadata["context_after"],
                         ]
                     )
-            except:
+            except Exception as ex:
+                print("Error processing evidence source:", ex, image_id, ris_id, retrieval_result.images)
                 evidence.url = None
                 evidence.scraped_text = None
                 evidence.answer_type = "Unanswerable"
