@@ -1,41 +1,183 @@
-# AVerImaTeC Shared Task
+# CTU AIC AVerImaTeC System
 
-# 🎊 News <!-- omit in toc -->
+[![arXiv](https://img.shields.io/badge/arXiv-2602.15190-b31b1b.svg)](https://arxiv.org/abs/2602.15190)
 
-- [2025.09] 🔥 AVerImaTeC shared task has been held [here](https://huggingface.co/spaces/FEVER-IT/AVerImaTeC). 
-- [2025.09] 🎉 We are pleased to announce that FEVER9 will be co-located with EACL2026! In this year's workshop, we will focus on image-text claim verification and leverage AVerImaTeC as the shared task. You can learn more about FEVER9 and past FEVER workshops [here](https://fever.ai/index.html).
-- [2025.09] 🎉 Our AVerImaTeC paper is accepted by NeurIPS Datasets and Benchmarks track! You can access the lastest version of the paper at [here](https://arxiv.org/pdf/2505.17978).
+This repository contains the CTU AIC submission system for the AVerImaTeC shared task on automatic verification of image-text claims with evidence from the web. The system combines text retrieval over an offline knowledge store with image retrieval via reverse image search, then asks a multimodal LLM to generate evidence, a verdict, and a justification in a single pass.
 
-# Baseline Implementation for AVerImaTeC Shared Task
+Our submission ranked 3rd on the AVerImaTeC leaderboard. The design goal is a strong, relatively affordable multimodal fact-checking pipeline that stays modular and easy to adapt.
 
-This repository maintains the baseline for [AVerImaTeC shared task](https://huggingface.co/spaces/FEVER-IT/AVerImaTeC). The shared task is built on top of the dataset, AVERIMATEC: A Dataset for Automatic Verification of Image-Text Claims with Evidence from the Web. You can find the paper [here](https://arxiv.org/pdf/2505.17978). To reduce the expense of web search, we provide the knowledge store containing the right eivdence for claim verification as well as noisy evidence in this [link](https://drive.google.com/drive/folders/1vjy7mjA4NTuLQfPh5-NZFpaxn8_H9rUs?usp=sharing). The code implementation is compatible with using the provided knowledge store.
+## Overview
 
-## Content
-- [Dataset Preparation](#dataset-preparation)
-- [Experiment Setting](#experiment-setting)
-- [Baseline Implementation](#baseline-implementation)
-- [Baseline Evaluation](#baseline-evaluation)
+The system follows a dual-retrieval retrieval-augmented generation pipeline:
 
-## Dataset Preparation
+```mermaid
+flowchart LR
+    A["Claim text + claim image(s)"] --> B["Text retriever"]
+    A --> C["Image retriever"]
+    B --> B1["FAISS vector search over claim-specific datastore"]
+    B1 --> B2["MMR reranking"]
+    C --> C1["Reverse image search"]
+    C1 --> C2["Scrape retrieved pages"]
+    C2 --> C3["Filter by publication date"]
+    B2 --> D["Prompt assembly"]
+    C3 --> D
+    D --> E["Multimodal LLM"]
+    E --> F["Evidence"]
+    E --> G["Verdict"]
+    E --> H["Justification"]
+```
 
-### AVerImaTeC Data
-Please download the data from our provided [link](https://huggingface.co/datasets/Rui4416/AVerImaTeC). Put the *images.zip* under the *data/data_clean* folder and unzip it. For json files, please put it under the *data/data_clean/split_data*. 
+At a high level, the pipeline has three stages:
 
-### Evidence Source
-In order to use our provided knowledge store, please download the files from [here](https://drive.google.com/drive/folders/1vjy7mjA4NTuLQfPh5-NZFpaxn8_H9rUs?usp=sharing). 
-If you would like to do your own web search, in order to use Google Search, you need to put your own API keys in the folder *private_info*.
+1. `Text-based retrieval`
+   The provided text-only AVerImaTeC knowledge store is chunked, embedded with `mixedbread-ai/mxbai-embed-large-v1`, retrieved with FAISS, and diversified with maximal marginal relevance.
+2. `Image-based retrieval`
+   Each claim image is handled separately with reverse image search. Retrieved pages are scraped, filtered to keep only evidence that predates the claim, and represented as image-related sources.
+3. `Generation`
+   A multimodal LLM receives the claim, claim images, and both source sets, then produces evidence, a final label, and a justification. The output is post-processed into AVerImaTeC submission format.
 
-## Experiment Setting
-In order to implement our baselines, you need to install essential packages listed in *requirement.txt*.
+## What Is In This Repository
 
-## Baseline Implementation
-In order to generate predictions with our baselines, please refer to the [provided script](https://github.com/abril4416/AVerImaTec_Shared_Task/blob/main/scripts/baseline_script.sh), and make sure you set the *[ROOT_PATH]* and *[DATASTORE_PATH]* correctly. You can also set *--DEBUG True* to switch to the debug mode (only test a few claims) for easy debugging.
-We provide the implementation for the following LLMs and MLLMs: LLM_NAME can be set to *gemini-2.0-flash-001*, *qwen* and *gemma* while MLLM_NAM can be set to *gemini-2.0-flash-001*, *qwen*, *gemma* and *llava*.
+The core implementation lives in [`src/`](src):
 
-Different strategies of question generation (described in Section 7.1 in the [paper](https://arxiv.org/pdf/2505.17978)) are available in the implementation. You can change *--HYBRID_QG*, *--PARA_QG* to be True to adopt the hybrid and parallel question generation, otherwise, dynamic question generation. By setting *--QG_ICL* to be True, you are using few-shot in-context learning for question generation.
+- [`src/mm_checker.py`](src/mm_checker.py) contains the main multimodal fact-checking loop, including question generation, answering, verification, and justification.
+- [`src/retrieval.py`](src/retrieval.py) defines the FAISS-based text retrievers and attaches reverse-image-search results to each datapoint.
+- [`src/evidence_generation.py`](src/evidence_generation.py) converts model outputs into evidence objects and submission-ready evidence entries.
+- [`src/pipeline.py`](src/pipeline.py) wires retrieval, evidence generation, and classification into a reusable pipeline abstraction.
+- [`src/classification.py`](src/classification.py) provides verdict prediction utilities.
+- [`src/config.py`](src/config.py) defines the main CLI flags.
+- [`src/dynamic_mm_fc/`](src/dynamic_mm_fc) contains modular components for question generation, planning, QA, verification, summarization, prompts, and web tooling.
 
-If you would like to submit your predictions to our [leaderboard](https://huggingface.co/spaces/FEVER-IT/AVerImaTeC), please use our [code](https://github.com/abril4416/AVerImaTec_Shared_Task/blob/main/prepare_submission/ipython/Result_Convert.ipynb) to covert the baseline outputs to the required format of submission.
+Supporting utilities:
 
+- [`prepare_submission/`](prepare_submission) contains conversion and offline evaluation helpers.
+- [`templates/`](templates) contains prompt and evaluation templates.
+- [`script/`](script) contains cluster job scripts and evaluation wrappers.
 
-## Baseline Evaluation
-After post-processing to generate the submission file with the [code](https://github.com/abril4416/AVerImaTec_Shared_Task/blob/main/prepare_submission/ipython/Result_Convert.ipynb), you can use the [script](https://github.com/abril4416/AVerImaTec_Shared_Task/blob/main/scripts/eval_offline.sh) to do your own evaluation. After runnimg the script, you can view the generated scores with the code [here](https://github.com/abril4416/AVerImaTec_Shared_Task/blob/main/prepare_submission/ipython/Eval_Score_Compute.ipynb). It returns the question score, evidence score, conditional verdict accuracy and conditional justification score. You can set *threshold* to different values to set different thresholds of the evidence scores (more details in Section6 in the [paper](https://arxiv.org/pdf/2505.17978)).
+## System Details
+
+### Text Retrieval
+
+- Offline knowledge is stored per claim and loaded from a FAISS index.
+- The retriever uses exact vector similarity search and MMR reranking for better coverage and lower redundancy.
+- In the paper setup, 20 nearest neighbors are retrieved and reranked down to 7 final text sources.
+
+### Image Retrieval
+
+- Reverse image search is run independently for each claim image.
+- Retrieved pages are scraped into LLM-friendly text.
+- Sources published after the claim date are filtered out to preserve temporal validity of evidence.
+- Image-related sources are passed to the generator with dedicated numeric source IDs.
+
+### Generation and Output
+
+- The generator consumes text-related and image-related sources in one prompt.
+- Few-shot evidence examples are retrieved with BM25 and added to improve format adherence.
+- The model produces evidence, verdict, and justification in one pass.
+- Evidence is then converted into AVerImaTeC-style evidence text, with image markers when image-grounded sources are used.
+
+## Requirements
+
+The lightweight dependency snapshot in [`essential_requirement.txt`](essential_requirement.txt) lists the core versions used in this project:
+
+- Python `3.9.17`
+- PyTorch `2.4.0+cu121`
+- Transformers `4.50.2`
+- Accelerate `0.33.0`
+
+The code also depends on additional libraries used throughout the pipeline, including FAISS/LangChain integration, `rank-bm25`, `nltk`, and model- or API-specific packages depending on the selected backend.
+
+## Data Layout
+
+Expected local layout:
+
+```text
+data/
+  data_clean/
+    images/
+    split_data/
+      train.json
+      val.json
+      test.json
+```
+
+If you use the offline datastore, point `--DATASTORE_PATH` to the downloaded FAISS-backed knowledge store.
+
+The project also expects API credentials or local model access depending on the chosen configuration. Sensitive files under `private_info/` must remain uncommitted.
+
+## Running The System
+
+The main entry point for end-to-end fact-checking is [`src/mm_checker.py`](src/mm_checker.py).
+
+Example debug run:
+
+```bash
+python src/mm_checker.py \
+  --ROOT_PATH /absolute/path/to/AVerImaTec_Shared_Task \
+  --TEST_MODE val \
+  --LLM_NAME qwen \
+  --MLLM_NAME qwen \
+  --DATA_STORE True \
+  --DATASTORE_PATH /absolute/path/to/datastore \
+  --DEBUG True
+```
+
+Example with parallel question generation:
+
+```bash
+python src/mm_checker.py \
+  --ROOT_PATH /absolute/path/to/AVerImaTec_Shared_Task \
+  --TEST_MODE val \
+  --LLM_NAME gemma \
+  --MLLM_NAME gemma \
+  --DATA_STORE True \
+  --DATASTORE_PATH /absolute/path/to/datastore \
+  --PARA_QG True
+```
+
+Relevant CLI flags from [`src/config.py`](src/config.py):
+
+- `--PARA_QG True` enables parallel question generation.
+- `--HYBRID_QG True` enables hybrid question generation.
+- `--QG_ICL True` enables few-shot question generation.
+- `--NO_SEARCH True` skips retrieval and reuses precomputed questions.
+- `--GT_QUES True` and `--GT_EVID True` switch to oracle-style evaluation modes.
+
+Outputs are written under `fc_detailed_results/<llm>_<mllm>/<save_num>.pkl` in the repository root specified by `--ROOT_PATH`.
+
+## Submission And Evaluation
+
+The repository keeps the original submission utilities:
+
+- Convert detailed outputs to the official submission format with [`prepare_submission/ipython/Result_Convert.ipynb`](prepare_submission/ipython/Result_Convert.ipynb).
+- Run offline evaluation with [`prepare_submission/eval_offline.py`](prepare_submission/eval_offline.py) or the wrapper scripts in [`script/`](script).
+
+Example evaluation command:
+
+```bash
+python prepare_submission/eval_offline.py \
+  --root_dir /absolute/path/to/AVerImaTec_Shared_Task \
+  --llm_name gemma \
+  --mllm_name gemma \
+  --save_num 12 \
+  --eval_model google/gemma-3-27b-it
+```
+
+## Results
+
+In the shared-task submission described in the paper, the system achieved:
+
+- Question score: `0.81`
+- Evidence score: `0.33`
+- Verdict accuracy: `0.35`
+- Justification score: `0.30`
+
+This placed the system 3rd overall on the AVerImaTeC leaderboard.
+
+## Paper
+
+The README summarizes the system described in the accompanying arXiv paper:
+
+- [arXiv:2602.15190](https://arxiv.org/abs/2602.15190)
+
+If you use this repository, please cite the paper and acknowledge the AVerImaTeC shared task and dataset.
