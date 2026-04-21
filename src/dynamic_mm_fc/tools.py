@@ -19,9 +19,18 @@ import sys
 sys.path.append("..")
 from private_info.API_keys import GOOGLE_API_KEY, GOOGLE_SEARCH_ENGINE_ID
 
-from google.cloud import vision
+try:
+    from google.cloud import vision
+    _vision_client = None
 
-client = vision.ImageAnnotatorClient()
+    def _get_vision_client():
+        global _vision_client
+        if _vision_client is None:
+            _vision_client = vision.ImageAnnotatorClient()
+        return _vision_client
+except Exception:
+    def _get_vision_client():
+        raise RuntimeError("Google Cloud Vision is not available. Install google-cloud-vision and set credentials.")
 TEXT_QUES_PROMPT = "You need to answer a question according to a set of retrieved documents. "
 TEXT_QUES_PROMPT += "Question: %s. Document: %s. "
 TEXT_QUES_PROMPT += "If the question is not answerable according to the provided document, please answer as: No answer can be found. Start you answer as: **ANSWER:** "
@@ -86,7 +95,7 @@ def detect_web(client, path, how_many_queries=50):
         content = image_file.read()
     # content=base64.b64decode(content.encode())
     image = vision.Image(content=content)
-    response = client.web_detection(image=image, max_results=how_many_queries)
+    response = _get_vision_client().web_detection(image=image, max_results=how_many_queries)
     return response.web_detection
 
 

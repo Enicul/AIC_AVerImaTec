@@ -3,6 +3,8 @@
 Pydantic 2.11.7
 google-genai
 """
-#GEMINI_API_KEY=#put your own GEMINI API Key
-#GOOGLE_API_KEY=#put your own Google Search API Key
-#GOOGLE_SEARCH_ENGINE_ID=#put your ownGoogle Search Engine Key
+import os
+
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY", "")
+GOOGLE_SEARCH_ENGINE_ID = os.environ.get("GOOGLE_SEARCH_ENGINE_ID", "")

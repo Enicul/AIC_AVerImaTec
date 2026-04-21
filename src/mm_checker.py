@@ -345,8 +345,7 @@ if __name__ == "__main__":
             model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
                 "Qwen/Qwen2.5-VL-7B-Instruct",
                 torch_dtype=torch.bfloat16,
-                # device_map="auto"
-                device_map={"": "cuda:1"},
+                device_map={"": "cuda:0"},
             )
             model.train(False)
             min_pixels = 64 * 28 * 28
