@@ -22,7 +22,7 @@ URL_REGEX = (
     r"https?:\/\/(?:www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b(?:[-a-zA-Z0-9@:%_\+.~#?&//=]*)"
 )
 
-ROOT_DIR = os.path.abspath("../../..")
+ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
 IMAGE_FOLDER = os.path.join(ROOT_DIR, "download_img_from_urls")
 ERROR_LOGGER_FOLDER = os.path.join(ROOT_DIR, "error_logger")
 
