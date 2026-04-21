@@ -555,15 +555,11 @@ if __name__ == "__main__":
                 gt_info = questions
             else:
                 gt_info = None
-            detailed_info = checker.verify_mm_claim(claim_txt, claim_img, date, location, req_id, gt_info)
-            """
             try:
-                detailed_info= checker.verify_mm_claim(claim_txt, claim_img, 
-                                                       date, location, req_id, gt_info)
-            except:
-                print ('Exception!!!!')
+                detailed_info = checker.verify_mm_claim(claim_txt, claim_img, date, location, req_id, gt_info)
+            except Exception as e:
+                print('Exception!!!!', e)
                 continue
-            """
 
         all_results[req_id] = detailed_info
         if counts % 5 == 0:
