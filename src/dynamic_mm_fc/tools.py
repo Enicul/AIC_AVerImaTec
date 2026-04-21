@@ -287,7 +287,7 @@ def reverse_image_search(
         img_name = image.split("/")[-1].split(".")[0]
         # check if det results available
         if use_data_store:
-            web_text_path = os.path.join(datastore_path, "text_related/image_related_store_text_" + test_mode)
+            web_text_path = os.path.join(datastore_path, "text_related/image_related_store_text_" + test_mode + "_filled")
         elif os.path.exists(os.path.join(path, "web_det_info/reverse_image_search/urls", img_name + ".json")):
             print("Reverse image search results already saved!", img_name)
             valid_web_urls = load_json(
@@ -530,7 +530,7 @@ def text_search_text(
     sort_date = year + month + date
     file_name = search_term + "_" + sort_date
     if use_data_store:
-        web_text_path = os.path.join(datastore_path, "text_related/text_related_store_text_" + test_mode)
+        web_text_path = os.path.join(datastore_path, "text_related/text_related_store_text_" + test_mode + "_filled")
     elif os.path.exists(os.path.join(path, "web_det_info/text_search_text/urls", file_name + ".json")):
         valid_web_urls = load_json(
             os.path.join(path, "web_det_info/text_search_text/urls", file_name + ".json")
