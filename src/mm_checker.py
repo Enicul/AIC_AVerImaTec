@@ -507,19 +507,6 @@ if __name__ == "__main__":
         req_id = i
         if req_id in all_results:
             continue
-        if counts % 10 == 0:
-            pkl.dump(
-                all_results,
-                open(
-                    os.path.join(
-                        args.ROOT_PATH,
-                        "fc_detailed_results",
-                        "_".join([llm_name, mllm_name]),
-                        str(args.SAVE_NUM) + ".pkl",
-                    ),
-                    "wb",
-                ),
-            )
         counts += 1
         fact_checking_article = annotation["article"]
         if args.GT_EVID:
@@ -579,6 +566,19 @@ if __name__ == "__main__":
             """
 
         all_results[req_id] = detailed_info
+        if counts % 5 == 0:
+            pkl.dump(
+                all_results,
+                open(
+                    os.path.join(
+                        args.ROOT_PATH,
+                        "fc_detailed_results",
+                        "_".join([llm_name, mllm_name]),
+                        str(args.SAVE_NUM) + ".pkl",
+                    ),
+                    "wb",
+                ),
+            )
     pkl.dump(
         all_results,
         open(
