@@ -18,7 +18,7 @@ if __name__ == "__main__":
     for i in sorted(data.keys()):
         info = data[i]
         questions = [qa["question"] for qa in info.get("QA_info", [])]
-        evidence = info.get("evid_context", [])
+        evidence = info.get("evidence", info.get("evid_context", []))
         verdict = info.get("verdict", "Not Enough Evidence")
         justification = info.get("justification", "")
         results.append({
