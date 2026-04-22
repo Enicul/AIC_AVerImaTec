@@ -41,7 +41,7 @@ if __name__ == "__main__":
     parser.add_argument("--mllm_name", default="gemma")
     parser.add_argument("--eval_name", default=None)
     parser.add_argument(
-        "--pred_file_path", default="/mnt/data/factcheck/averimatec/submissions/submission.json"
+        "--pred_file_path", default=""
     )
     parser.add_argument(
         "--root_dir", default="/mnt/data/factcheck/averimatec"
