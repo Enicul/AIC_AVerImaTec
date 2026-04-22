@@ -72,7 +72,10 @@ if __name__ == "__main__":
 
     print("Root dir:", args.root_dir)
     # p2_data = load_json(os.path.join(args.root_dir, "data/data_clean/split_data/test.json"))
-    p2_data = load_json(os.path.join(args.root_dir, "val.json"))
+    val_path = os.path.join(args.root_dir, "val.json")
+    if not os.path.exists(val_path):
+        val_path = os.path.join(args.root_dir, "data/data_clean/split_data/val.json")
+    p2_data = load_json(val_path)
     if len(args.pred_file_path) > 0:
         pred_file = load_json(args.pred_file_path)
     else:
