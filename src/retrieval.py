@@ -102,7 +102,18 @@ class CustomVectorStoreRetriever(Retriever):
         documents = []
         for pos_idx in top_k_indices:
             chunk_id = pos_to_id[int(pos_idx)]
-            chunk = chunks[chunk_id] if isinstance(chunks, dict) else chunks[int(pos_idx)]
+            if isinstance(chunks, dict):
+                # Try chunk_id as-is, then int, then str
+                if chunk_id in chunks:
+                    chunk = chunks[chunk_id]
+                elif int(chunk_id) in chunks:
+                    chunk = chunks[int(chunk_id)]
+                elif str(chunk_id) in chunks:
+                    chunk = chunks[str(chunk_id)]
+                else:
+                    continue
+            else:
+                chunk = chunks[int(pos_idx)]
             if isinstance(chunk, dict):
                 page_content = chunk.get("page_content", chunk.get("text", str(chunk)))
                 metadata = chunk.get("metadata", {})
