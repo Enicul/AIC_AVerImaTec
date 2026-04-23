@@ -514,7 +514,6 @@ if __name__ == "__main__":
         if req_id in all_results:
             continue
         counts += 1
-        fact_checking_article = annotation["article"]
         if args.GT_EVID:
             questions = annotation["questions"]
         elif args.NO_SEARCH:
