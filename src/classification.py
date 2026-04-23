@@ -199,41 +199,44 @@ class HuggingfaceClassifier(Classifier):
 
 
 class RandomForestClassifier(Classifier):
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        model_path="/mnt/data/factcheck/averitec-data/bryce_data/all_data_model.pkl",
+        tfidf_path="/mnt/data/factcheck/averitec-data/bryce_data/all_data_tfidf_vectorizer.pkl",
+        label_map_path="/mnt/data/factcheck/averitec-data/bryce_data/all_data_label_map.pkl",
+        secondary_model_path="/mnt/data/factcheck/averitec-data/bryce_data/nee_cp_model.pkl",
+        secondary_tfidf_path="/mnt/data/factcheck/averitec-data/bryce_data/nee_cptfidf_vectorizer.pkl",
+        secondary_label_map_path="/mnt/data/factcheck/averitec-data/bryce_data/nee_cplabel_map.pkl",
+    ) -> None:
         super().__init__()
-        # Load the main model and preprocessing objects
-        with open("/mnt/data/factcheck/averitec-data/bryce_data/all_data_model.pkl", "rb") as model_file:
-            self.main_rf = pickle.load(model_file)
+        try:
+            # Load the main model and preprocessing objects
+            with open(model_path, "rb") as model_file:
+                self.main_rf = pickle.load(model_file)
 
-        with open(
-            "/mnt/data/factcheck/averitec-data/bryce_data/all_data_tfidf_vectorizer.pkl", "rb"
-        ) as tfidf_file:
-            self.main_vectorizer = pickle.load(tfidf_file)
+            with open(tfidf_path, "rb") as tfidf_file:
+                self.main_vectorizer = pickle.load(tfidf_file)
 
-        with open(
-            "/mnt/data/factcheck/averitec-data/bryce_data/all_data_label_map.pkl", "rb"
-        ) as label_map_file:
-            self.main_label_map = pickle.load(label_map_file)
+            with open(label_map_path, "rb") as label_map_file:
+                self.main_label_map = pickle.load(label_map_file)
 
-        # Load the secondary model and preprocessing objects
-        with open(
-            "/mnt/data/factcheck/averitec-data/bryce_data/nee_cp_model.pkl", "rb"
-        ) as secondary_model_file:
-            self.secondary_rf = pickle.load(secondary_model_file)
+            # Load the secondary model and preprocessing objects
+            with open(secondary_model_path, "rb") as secondary_model_file:
+                self.secondary_rf = pickle.load(secondary_model_file)
 
-        with open(
-            "/mnt/data/factcheck/averitec-data/bryce_data/nee_cptfidf_vectorizer.pkl", "rb"
-        ) as secondary_tfidf_file:
-            self.secondary_vectorizer = pickle.load(secondary_tfidf_file)
+            with open(secondary_tfidf_path, "rb") as secondary_tfidf_file:
+                self.secondary_vectorizer = pickle.load(secondary_tfidf_file)
 
-        with open(
-            "/mnt/data/factcheck/averitec-data/bryce_data/nee_cplabel_map.pkl", "rb"
-        ) as secondary_label_map_file:
-            self.secondary_label_map = pickle.load(secondary_label_map_file)
+            with open(secondary_label_map_path, "rb") as secondary_label_map_file:
+                self.secondary_label_map = pickle.load(secondary_label_map_file)
 
-        # Inverse label maps
-        self.main_label_map_inverse = {v: k for k, v in self.main_label_map.items()}
-        self.secondary_label_map_inverse = {v: k for k, v in self.secondary_label_map.items()}
+            # Inverse label maps
+            self.main_label_map_inverse = {v: k for k, v in self.main_label_map.items()}
+            self.secondary_label_map_inverse = {v: k for k, v in self.secondary_label_map.items()}
+            self._available = True
+        except (FileNotFoundError, Exception) as e:
+            print(f"Warning: RandomForestClassifier could not load model files: {e}. Falling back to DefaultClassifier behaviour.")
+            self._available = False
 
     # Preprocess claims using the respective vectorizers
     def preprocess_claim(self, claim, vectorizer):
@@ -282,6 +285,8 @@ class RandomForestClassifier(Classifier):
         *args,
         **kwargs,
     ) -> ClassificationResult:
+        if not self._available:
+            return DefaultClassifier()(datapoint, evidence_generation_result, retrieval_result, *args, **kwargs)
         claim = datapoint.claim
         predicted_label, class_probabilities = self.predict_single_claim(claim)
         # remap class probabilities to np array

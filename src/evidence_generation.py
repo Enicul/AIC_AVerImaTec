@@ -252,9 +252,16 @@ class DynamicFewShotEvidenceGenerator(GptEvidenceGenerator):
         self,
         model="gpt-4o",
         client: SimpleJSONChat = None,
-        reference_corpus_path="/mnt/data/factcheck/averitec-data/data/train.json",
+        reference_corpus_path=None,
         k=10,
     ):
+        if reference_corpus_path is None:
+            self.reference_corpus = []
+            self.bm25 = None
+            self.k = k
+            super().__init__(model, client)
+            return
+
         # load reference (train) corpus
         with open(reference_corpus_path, "r") as f:
             self.reference_corpus = json.load(f)
@@ -314,9 +321,12 @@ class DynamicFewShotEvidenceGenerator(GptEvidenceGenerator):
     ) -> EvidenceGenerationResult:
         # get top k sentences
         claim = datapoint.claim
-        scores = self.bm25.get_scores(nltk.word_tokenize(claim))
-        top_n = np.argsort(scores)[::-1][: self.k]
-        few_shot_examples = [self.reference_corpus[i] for i in top_n]
+        if self.bm25 is not None:
+            scores = self.bm25.get_scores(nltk.word_tokenize(claim))
+            top_n = np.argsort(scores)[::-1][: self.k]
+            few_shot_examples = [self.reference_corpus[i] for i in top_n]
+        else:
+            few_shot_examples = []
         # get system prompt
         system_prompt = self.format_system_prompt(retrieval_result, few_shot_examples)
         # call gpt
@@ -466,9 +476,19 @@ class DynamicFewShotBatchedEvidenceGenerator(GptBatchedEvidenceGenerator):
         self,
         model="gpt-5.1",
         client: SimpleJSONChat = None,
-        reference_corpus_path="/mnt/data/factcheck/averimatec/train.json",
+        reference_corpus_path=None,
         k=10,
+        images_dir=None,
     ):
+        self.images_dir = images_dir
+
+        if reference_corpus_path is None:
+            self.reference_corpus = []
+            self.bm25 = None
+            self.k = k
+            super().__init__(model, client)
+            return
+
         # load reference (train) corpus
         with open(reference_corpus_path, "r") as f:
             self.reference_corpus = json.load(f)
@@ -567,9 +587,12 @@ class DynamicFewShotBatchedEvidenceGenerator(GptBatchedEvidenceGenerator):
     ) -> EvidenceGenerationResult:
         # get top k sentences
         claim = datapoint.claim
-        scores = self.bm25.get_scores(nltk.word_tokenize(claim))
-        top_n = np.argsort(scores)[::-1][: self.k]
-        few_shot_examples = [self.reference_corpus[i] for i in top_n]
+        if self.bm25 is not None:
+            scores = self.bm25.get_scores(nltk.word_tokenize(claim))
+            top_n = np.argsort(scores)[::-1][: self.k]
+            few_shot_examples = [self.reference_corpus[i] for i in top_n]
+        else:
+            few_shot_examples = []
         # get system prompt
         system_prompt = self.format_system_prompt(
             retrieval_result, few_shot_examples, datapoint.speaker, datapoint.claim_date
@@ -578,8 +601,10 @@ class DynamicFewShotBatchedEvidenceGenerator(GptBatchedEvidenceGenerator):
             {"type": "text", "text": datapoint.claim},
         ]
 
+        images_dir = getattr(self, "images_dir", None) or os.environ.get("IMAGES_DIR", "")
         for i, img in enumerate(datapoint.claim_images):
-            base64_image = filesystem_base64("/mnt/data/factcheck/averimatec/images/" + img)
+            img_path = os.path.join(images_dir, img) if images_dir else img
+            base64_image = filesystem_base64(img_path)
             user_message_content.append(
                 {
                     "type": "image_url",
