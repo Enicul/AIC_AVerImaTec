@@ -342,16 +342,22 @@ if __name__ == "__main__":
             from transformers import Qwen2_5_VLForConditionalGeneration, AutoTokenizer, AutoProcessor
             from qwen_vl_utils import process_vision_info
 
+            base_model_path = "/home/aied_test/models/Qwen2.5-VL-7B-Instruct"
             model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
-                "Qwen/Qwen2.5-VL-7B-Instruct",
+                base_model_path,
                 torch_dtype=torch.bfloat16,
                 device_map={"": "cuda:0"},
             )
+            if args.LORA_PATH is not None:
+                from peft import PeftModel
+                print(f"Loading LoRA adapter from {args.LORA_PATH}")
+                model = PeftModel.from_pretrained(model, args.LORA_PATH)
+                model = model.merge_and_unload()
             model.train(False)
             min_pixels = 64 * 28 * 28
             max_pixels = 64 * 28 * 28
             processor = AutoProcessor.from_pretrained(
-                "Qwen/Qwen2.5-VL-7B-Instruct", min_pixels=min_pixels, max_pixels=max_pixels
+                base_model_path, min_pixels=min_pixels, max_pixels=max_pixels
             )
             mllm_model = {"model": model, "processor": processor}
         elif mllm_name == "llava":

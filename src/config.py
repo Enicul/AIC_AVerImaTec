@@ -39,5 +39,8 @@ def parse_opt():
     parser.add_argument(
         "--DATASTORE_PATH", type=str, default="/mnt/data/factcheck/averimatec"
     )  # set your path to the download knowledge store if using provided data store
+    parser.add_argument(
+        "--LORA_PATH", type=str, default=None
+    )  # optional LoRA adapter path to apply on top of the MLLM base model
     args = parser.parse_args()
     return args
