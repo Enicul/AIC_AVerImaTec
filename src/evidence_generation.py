@@ -157,6 +157,8 @@ class EvidenceGenerator:
                 answer=e.get("answer", None),
                 evidence_text=e.get("evidence_text", None),
             )
+            image_id = None
+            ris_id = None
             try:
                 id = int(str(e["source"]).split(",")[0]) - 1
                 evidence.answer_type = cls.parse_answer_type(e.get("answer_type", ""))
