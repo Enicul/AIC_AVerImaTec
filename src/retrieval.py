@@ -87,25 +87,28 @@ class CustomVectorStoreRetriever(Retriever):
         store_dir = f"{self.path}/{datapoint.claim_id}"
         chunks_path = os.path.join(store_dir, "chunks.pkl")
         embeddings_path = os.path.join(store_dir, "embeddings.npy")
+        pos_to_id_path = os.path.join(store_dir, "pos_to_id.pkl")
 
         with open(chunks_path, "rb") as f:
             chunks = pickle.load(f)
         emb_matrix = np.load(embeddings_path).astype(np.float32)
+        with open(pos_to_id_path, "rb") as f:
+            pos_to_id = pickle.load(f)
 
         query_vec = np.array(self.embeddings.embed_query(datapoint.claim), dtype=np.float32)
         scores = self._cosine_similarity(query_vec, emb_matrix)
         top_k_indices = np.argsort(scores)[::-1][: self.k]
 
         documents = []
-        for idx in top_k_indices:
-            chunk = chunks[idx]
+        for pos_idx in top_k_indices:
+            chunk_id = pos_to_id[int(pos_idx)]
+            chunk = chunks[chunk_id] if isinstance(chunks, dict) else chunks[int(pos_idx)]
             if isinstance(chunk, dict):
                 page_content = chunk.get("page_content", chunk.get("text", str(chunk)))
                 metadata = chunk.get("metadata", {})
             else:
                 page_content = str(chunk)
                 metadata = {}
-            # Ensure metadata has expected keys with defaults
             metadata.setdefault("url", "")
             metadata.setdefault("context_before", "")
             metadata.setdefault("context_after", "")
