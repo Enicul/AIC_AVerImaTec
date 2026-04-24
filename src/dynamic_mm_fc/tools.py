@@ -93,7 +93,6 @@ def detect_web(client, path, how_many_queries=50):
     """Detects web annotations given an image."""
     with io.open(path, "rb") as image_file:
         content = image_file.read()
-    # content=base64.b64decode(content.encode())
     image = vision.Image(content=content)
     response = _get_vision_client().web_detection(image=image, max_results=how_many_queries)
     return response.web_detection
@@ -109,7 +108,10 @@ def compare_date(conv_ref_date, url_date):
 
 def det_web_valid_filter(image, date):
     # image=Image.open(img_path).convert('RGB')
-    web_annotations = detect_web(client, image)
+    try:
+        web_annotations = detect_web(None, image)
+    except Exception:
+        return []
     cur_raw_ris_result = []
     for page in web_annotations.pages_with_matching_images:
         title = page.page_title
