@@ -343,23 +343,48 @@ if __name__ == "__main__":
             from qwen_vl_utils import process_vision_info
 
             base_model_path = "/home/aied_test/models/Qwen2.5-VL-7B-Instruct"
-            model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
-                base_model_path,
-                torch_dtype=torch.bfloat16,
-                device_map={"": "cuda:0"},
-            )
-            if args.LORA_PATH is not None:
-                from peft import PeftModel
-                print(f"Loading LoRA adapter from {args.LORA_PATH}")
-                model = PeftModel.from_pretrained(model, args.LORA_PATH)
-                model = model.merge_and_unload()
-            model.train(False)
             min_pixels = 64 * 28 * 28
             max_pixels = 64 * 28 * 28
             processor = AutoProcessor.from_pretrained(
                 base_model_path, min_pixels=min_pixels, max_pixels=max_pixels
             )
-            mllm_model = {"model": model, "processor": processor}
+
+            need_supp = args.LORA_PATH is not None and any([
+                args.SUPP_QG, args.SUPP_VQA, args.SUPP_VERDICT, args.SUPP_JUSTI
+            ])
+            need_base = not all([args.SUPP_QG, args.SUPP_VQA, args.SUPP_VERDICT, args.SUPP_JUSTI])
+
+            if need_base or not need_supp:
+                base_model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
+                    base_model_path, torch_dtype=torch.bfloat16, device_map={"": "cuda:0"},
+                )
+                base_model.train(False)
+            else:
+                base_model = None
+
+            if need_supp:
+                from peft import PeftModel
+                print(f"Loading suppressed (LoRA) model from {args.LORA_PATH}")
+                supp_model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
+                    base_model_path, torch_dtype=torch.bfloat16, device_map={"": "cuda:0"},
+                )
+                supp_model = PeftModel.from_pretrained(supp_model, args.LORA_PATH)
+                supp_model = supp_model.merge_and_unload()
+                supp_model.train(False)
+            else:
+                supp_model = base_model
+
+            # If no suppression flags set but LORA_PATH given, old behaviour: apply LoRA globally
+            if args.LORA_PATH is not None and not need_supp:
+                from peft import PeftModel
+                print(f"Loading LoRA adapter from {args.LORA_PATH} (global)")
+                base_model = PeftModel.from_pretrained(base_model, args.LORA_PATH)
+                base_model = base_model.merge_and_unload()
+                base_model.train(False)
+                supp_model = base_model
+
+            mllm_model = {"model": base_model if base_model is not None else supp_model, "processor": processor}
+            supp_mllm_model = {"model": supp_model, "processor": processor}
         elif mllm_name == "llava":
             from transformers import LlavaNextProcessor, LlavaNextForConditionalGeneration
 
@@ -421,8 +446,15 @@ if __name__ == "__main__":
     else:
         demo_data_tool = None
 
+    # Select base or suppressed model per step for ablation
+    _supp = locals().get("supp_mllm_model", mllm_model)
+    qg_mllm   = _supp if args.SUPP_QG      else mllm_model
+    vqa_mllm  = _supp if args.SUPP_VQA     else mllm_model
+    verd_mllm = _supp if args.SUPP_VERDICT else mllm_model
+    just_mllm = _supp if args.SUPP_JUSTI   else mllm_model
+
     qg_model = qg_model.QG_Model(
-        mllm_model,
+        qg_mllm,
         mllm_name,
         llm_model,
         llm_name,
@@ -435,7 +467,7 @@ if __name__ == "__main__":
     qa_model = qa_model.QA_Model(
         planner,
         llm_model,
-        mllm_model,
+        vqa_mllm,
         llm_name,
         mllm_name,
         args.SAVE_NUM,
@@ -446,8 +478,8 @@ if __name__ == "__main__":
         args.DATA_STORE,
         args.DATASTORE_PATH,
     )
-    verifier = verifier.Verify_Model(mllm_model, mllm_name)
-    justification_gen = justification_gen.Justification_Model(mllm_model, mllm_name)
+    verifier = verifier.Verify_Model(verd_mllm, mllm_name)
+    justification_gen = justification_gen.Justification_Model(just_mllm, mllm_name)
     summarizer = summarizer.Summarize_Model(llm_model, llm_name, args.DEBUG)
 
     checker = MM_Checker(
@@ -567,7 +599,7 @@ if __name__ == "__main__":
                 continue
 
         all_results[req_id] = detailed_info
-        if counts % 5 == 0:
+        if True:  # save every claim
             pkl.dump(
                 all_results,
                 open(

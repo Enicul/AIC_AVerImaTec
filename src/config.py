@@ -42,5 +42,10 @@ def parse_opt():
     parser.add_argument(
         "--LORA_PATH", type=str, default=None
     )  # optional LoRA adapter path to apply on top of the MLLM base model
+    # Step-level suppression flags for ablation study
+    parser.add_argument("--SUPP_QG", type=bool, default=False)       # suppress MLLM at question generation
+    parser.add_argument("--SUPP_VQA", type=bool, default=False)      # suppress MLLM at visual QA (Tool B)
+    parser.add_argument("--SUPP_VERDICT", type=bool, default=False)  # suppress MLLM at verdict prediction
+    parser.add_argument("--SUPP_JUSTI", type=bool, default=False)    # suppress MLLM at justification+summary
     args = parser.parse_args()
     return args
