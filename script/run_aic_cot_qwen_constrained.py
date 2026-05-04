@@ -53,8 +53,8 @@ def parse_args():
 
 
 def build_json_schema(source_ids):
-    def bounded_text(max_len):
-        return {"type": "string", "maxLength": max_len}
+    def bounded_text(max_len, min_len=1):
+        return {"type": "string", "minLength": min_len, "maxLength": max_len}
 
     return {
         "type": "object",
@@ -67,7 +67,7 @@ def build_json_schema(source_ids):
             "verdict_justification",
         ],
         "properties": {
-            "reasoning": bounded_text(900),
+            "reasoning": bounded_text(900, min_len=80),
             "questions": {
                 "type": "array",
                 "minItems": 1,
