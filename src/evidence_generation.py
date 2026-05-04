@@ -474,11 +474,32 @@ class GptBatchedEvidenceGenerator(GptEvidenceGenerator):
         except Exception as e:
             print(gpt_result)
             print(e)
-            print("failed, using fallback gpt")
-            # print stack trace
-            evidence_generation_result = self.fallback_gpt_generator(
-                pipeline_result.datapoint, pipeline_result.retrieval_result
+            openai_key = os.environ.get("OPENAI_API_KEY", "")
+            allow_openai_fallback = (
+                os.environ.get("AIC_ALLOW_OPENAI_FALLBACK") == "1"
+                and openai_key
+                and openai_key != "sk-dummy"
             )
+            if allow_openai_fallback:
+                print("failed, using fallback gpt")
+                evidence_generation_result = self.fallback_gpt_generator(
+                    pipeline_result.datapoint, pipeline_result.retrieval_result
+                )
+            else:
+                print("failed, recording parse error without fallback gpt")
+                evidence_generation_result = EvidenceGenerationResult(
+                    evidences=[],
+                    metadata={
+                        "reasoning": "",
+                        "suggested_label": [0, 0, 1, 0],
+                        "label_confidences": [0, 0, 1, 0],
+                        "llm_type": self.client.model,
+                        "llm_output": {},
+                        "raw_llm_output": gpt_result,
+                        "parse_error": str(e),
+                    },
+                    justification="",
+                )
         return PipelineResult(
             datapoint=pipeline_result.datapoint,
             retrieval_result=pipeline_result.retrieval_result,
