@@ -84,6 +84,14 @@ class EvidenceGenerationResult:
 
 
 class EvidenceGenerator:
+    REASONING_FIELD_INSTRUCTION = (
+        "Think step by step. First, identify what the claim asserts about both the "
+        "text and the images. Second, examine the text-related sources for textual "
+        "evidence. Third, examine the image-related sources for visual context that "
+        "confirms or contradicts the claim images. Fourth, combine textual and "
+        "visual evidence to assess the claim. Be thorough but concise."
+    )
+
     @classmethod
     def parse_label(cls, label: str) -> str:
         if "sup" in label.lower():
@@ -135,6 +143,12 @@ class EvidenceGenerator:
         except:
             print("Error parsing JSON for EvidenceGenerator.\n", message)
             return []
+
+    @classmethod
+    def pop_reasoning(cls, data):
+        if isinstance(data, dict):
+            return data.pop("reasoning", "")
+        return ""
 
     @classmethod
     def parse_answer_type(cls, text):
@@ -438,6 +452,7 @@ class GptBatchedEvidenceGenerator(GptEvidenceGenerator):
         self.last_llm_output = gpt_result
         gpt_data = self.parse_json(gpt_result)
         try:
+            reasoning = self.pop_reasoning(gpt_data)
             label_confidences = self.parse_label_probabilities(gpt_data["claim_veracity"])
             if "veracity_verdict" in gpt_data:
                 suggested_label = self.parse_label(gpt_data["veracity_verdict"])
@@ -448,6 +463,7 @@ class GptBatchedEvidenceGenerator(GptEvidenceGenerator):
             evidence_generation_result = EvidenceGenerationResult(
                 evidences=self.parse_evidence(gpt_data["questions"], pipeline_result.retrieval_result),
                 metadata={
+                    "reasoning": reasoning,
                     "suggested_label": suggested_label,
                     "label_confidences": label_confidences,
                     "llm_type": self.client.model,
@@ -545,6 +561,7 @@ class DynamicFewShotBatchedEvidenceGenerator(GptBatchedEvidenceGenerator):
         result += """\n---\n## Output formatting\nPlease, you MUST only print the output in the following output format:
 ```json
 {
+    "reasoning": "%s",
     "questions":
         [
             {"question": "<Your first question>", "answer": "<The answer to the Your first question>", "source": "<Single numeric source ID backing the answer for Your first question>", "answer_type":"<The type of first answer>", "evidence_text": "<Declarative sentence combining the question and answer, if image source was used, use [IMG] tag to refer to the image.>"},
@@ -559,7 +576,7 @@ class DynamicFewShotBatchedEvidenceGenerator(GptBatchedEvidenceGenerator):
     "veracity_verdict": "<The suggested veracity classification for the claim>",
     "verdict_justification": "<A brief justification of the veracity verdict>"
 }
-```"""
+```""" % self.REASONING_FIELD_INSTRUCTION
 
         # add few shot examples
         result += """\n---\n## Few-shot learning\nYou have access to the following few-shot learning examples for questions and answers.:\n"""
@@ -629,6 +646,7 @@ class DynamicFewShotBatchedEvidenceGenerator(GptBatchedEvidenceGenerator):
                         {"role": "user", "content": user_message_content},
                     ],
                     # "temperature": 0,
+                    "max_tokens": 2048,
                 },
             }
         )
