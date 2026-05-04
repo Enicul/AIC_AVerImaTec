@@ -33,12 +33,73 @@ class RetrievalResult:
 class Retriever:
     """Base class for document retrieval strategies."""
 
+    @staticmethod
+    def _load_json_or_jsonl(path: str):
+        with open(path, "r") as f:
+            text = f.read().strip()
+        if not text:
+            return []
+        try:
+            data = json.loads(text)
+            return data if isinstance(data, list) else [data]
+        except json.JSONDecodeError:
+            return [json.loads(line) for line in text.splitlines() if line.strip()]
+
+    @staticmethod
+    def _normalise_image_store_row(row: dict) -> dict:
+        url2text = row.get("url2text") or []
+        if isinstance(url2text, str):
+            url2text = [url2text]
+        content = row.get("content") or row.get("scrape_content") or " ".join(url2text)
+        title = row.get("title") or (content[:120] if content else row.get("url", ""))
+        thumbnail = row.get("thumbnailUrl") or row.get("thumbnail_url") or row.get("imageUrl") or ""
+        return {
+            "title": title,
+            "page_date": row.get("page_date") or row.get("date") or "",
+            "url": row.get("url", ""),
+            "imageUrl": row.get("imageUrl") or row.get("image_url") or thumbnail,
+            "thumbnailUrl": thumbnail,
+            "content": content,
+            "claim_image": row.get("claim_image") or row.get("image") or row.get("image_name"),
+        }
+
+    def _get_image_store_results(self, datapoint: Datapoint, max_per_image: int) -> List[Any]:
+        image_store_path = getattr(self, "image_store_path", None)
+        claim_images = datapoint.claim_images or []
+        buckets = [[] for _ in claim_images]
+        if image_store_path is None:
+            return buckets
+
+        store_file = os.path.join(image_store_path, f"{datapoint.claim_id}.json")
+        if not os.path.exists(store_file):
+            store_file = os.path.join(image_store_path, f"{datapoint.claim_id}.jsonl")
+        if not os.path.exists(store_file):
+            return buckets
+
+        for row in self._load_json_or_jsonl(store_file):
+            if not isinstance(row, dict):
+                continue
+            source = self._normalise_image_store_row(row)
+            claim_image = source.pop("claim_image", None)
+            if claim_image in claim_images:
+                target_idx = claim_images.index(claim_image)
+            else:
+                # The prepared AIC/VILLAIN stores are per claim, not always per image.
+                # In that case they correspond to the first claim-image RIS bucket.
+                target_idx = 0 if buckets else None
+            if target_idx is not None and len(buckets[target_idx]) < max_per_image:
+                buckets[target_idx].append(source)
+        return buckets
+
     def get_ris_results(
-        self, datapoint: Datapoint, max_per_image: int = 5, max_images: int = 10
+        self, datapoint: Datapoint, max_per_image: int = 9, max_images: int = 10
     ) -> List[Any]:
+        if getattr(self, "image_store_path", None) is not None:
+            return self._get_image_store_results(datapoint, max_per_image)
+
         ris_path = getattr(self, "ris_path", None)
         if ris_path is None:
-            return [[] for _ in datapoint.claim_images]
+            return [[] for _ in (datapoint.claim_images or [])[:max_images]]
         # if attribute ris_results, initiate it
         if not hasattr(self, "ris_results"):
             with open(
@@ -47,7 +108,7 @@ class Retriever:
                 self.ris_results = json.load(f)
         ris_results = self.ris_results.get(str(datapoint.claim_id), {})
         result = []
-        for image in datapoint.claim_images:
+        for image in (datapoint.claim_images or [])[:max_images]:
             result.append(ris_results.get(image, [])[:max_per_image])
         return result
 
@@ -68,8 +129,9 @@ class CustomVectorStoreRetriever(Retriever):
         self,
         path: str,
         embeddings: Embeddings = None,
-        k: int = 10,
+        k: int = 9,
         ris_path: Optional[str] = None,
+        image_store_path: Optional[str] = None,
     ):
         self.path = path
         if embeddings is None:
@@ -77,6 +139,7 @@ class CustomVectorStoreRetriever(Retriever):
         self.embeddings = embeddings
         self.k = k
         self.ris_path = ris_path
+        self.image_store_path = image_store_path
 
     def _cosine_similarity(self, query_vec: np.ndarray, matrix: np.ndarray) -> np.ndarray:
         query_norm = query_vec / (np.linalg.norm(query_vec) + 1e-10)

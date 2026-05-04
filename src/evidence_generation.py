@@ -188,9 +188,10 @@ class EvidenceGenerator:
                         == "Yes. Multiple sources report that dozens of Palestinian children were killed in Gaza in various rounds of conflict with Israel."
                     ):
                         print(id, image_id, ris_id, img)
-                    evidence.url = img["url"]
-                    evidence.scraped_text = img["title"]
-                    evidence.images = [jpg_to_base64(img["thumbnailUrl"])]
+                    evidence.url = img.get("url")
+                    evidence.scraped_text = img.get("content") or img.get("title")
+                    thumbnail_url = img.get("thumbnailUrl")
+                    evidence.images = [jpg_to_base64(thumbnail_url)] if thumbnail_url else []
                 else:
                     evidence.url = retrieval_result[id].metadata["url"]
                     evidence.scraped_text = "\n".join(
@@ -548,7 +549,7 @@ class DynamicFewShotBatchedEvidenceGenerator(GptBatchedEvidenceGenerator):
     def format_system_prompt(
         self, retrieval_result: RetrievalResult, few_shot_examples, author=None, date=None, medium=None
     ) -> str:
-        k = int(os.environ.get("retrieval_k", 7))
+        k = len(retrieval_result)
         # alternative for not outputing 10 every time - maybe better for classfiers (not problem now): (There is no need to output all 10 questions if you know that the questions contain all necessary information for fact-checking of the claim)
         result = "You are a professional fact checker of image-text claims, formulate up to 10 questions that cover all the facts needed to validate whether the factual statement (in User message) is true, false, uncertain or a matter of opinion. "
         result += (
@@ -573,12 +574,17 @@ class DynamicFewShotBatchedEvidenceGenerator(GptBatchedEvidenceGenerator):
         for i, e in enumerate(retrieval_result):
             result += f"\n---\n## Source ID: {i+1} ({e.metadata['url']})\n"
             result += "\n".join([e.metadata["context_before"], e.page_content, e.metadata["context_after"]])
-        for i, img in enumerate(retrieval_result.images):
-            for j, img in enumerate(img):
+        for i, image_sources in enumerate(retrieval_result.images):
+            for j, image_source in enumerate(image_sources):
                 result += f"\n---\n## Image Source ID: {j + 1 + (i+1)*10} (related to user image {i+1}, "
-                result += f" Title : {img['title']}, date: {img['page_date']}, url: {img['url']}, image url: {img['imageUrl']})\n"
-            if "content" in img:
-                result += img["content"]
+                result += (
+                    f" Title : {image_source.get('title', '')}, "
+                    f"date: {image_source.get('page_date', '')}, "
+                    f"url: {image_source.get('url', '')}, "
+                    f"image url: {image_source.get('imageUrl', '')})\n"
+                )
+                if image_source.get("content"):
+                    result += image_source["content"]
         result += """\n---\n## Output formatting\nPlease, you MUST only print the output in the following output format:
 ```json
 {

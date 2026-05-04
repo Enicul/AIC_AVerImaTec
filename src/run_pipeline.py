@@ -88,6 +88,15 @@ def parse_args():
         help="Path to reverse-image-search results directory. If not provided, RIS is skipped.",
     )
     parser.add_argument(
+        "--image_store_path",
+        type=str,
+        default=None,
+        help=(
+            "Path to prepared per-claim image-related/RIS text store. "
+            "This can be used instead of --ris_path for the AIC shared-task setup."
+        ),
+    )
+    parser.add_argument(
         "--images_dir",
         type=str,
         default=None,
@@ -96,7 +105,7 @@ def parse_args():
     parser.add_argument(
         "--k",
         type=int,
-        default=10,
+        default=9,
         help="Number of documents to retrieve per claim.",
     )
     return parser.parse_args()
@@ -136,6 +145,7 @@ def main():
         path=args.vector_store_path,
         k=args.k,
         ris_path=args.ris_path,
+        image_store_path=args.image_store_path,
     )
 
     # Build evidence generator
