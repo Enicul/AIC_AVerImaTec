@@ -53,6 +53,9 @@ def parse_args():
 
 
 def build_json_schema(source_ids):
+    def bounded_text(max_len):
+        return {"type": "string", "maxLength": max_len}
+
     return {
         "type": "object",
         "additionalProperties": False,
@@ -64,24 +67,24 @@ def build_json_schema(source_ids):
             "verdict_justification",
         ],
         "properties": {
-            "reasoning": {"type": "string"},
+            "reasoning": bounded_text(900),
             "questions": {
                 "type": "array",
                 "minItems": 1,
-                "maxItems": 5,
+                "maxItems": 3,
                 "items": {
                     "type": "object",
                     "additionalProperties": False,
                     "required": ["question", "answer", "source", "answer_type", "evidence_text"],
                     "properties": {
-                        "question": {"type": "string"},
-                        "answer": {"type": "string"},
+                        "question": bounded_text(220),
+                        "answer": bounded_text(450),
                         "source": {"type": "string", "enum": source_ids},
                         "answer_type": {
                             "type": "string",
                             "enum": ["Boolean", "Extractive", "Abstractive", "Unanswerable"],
                         },
-                        "evidence_text": {"type": "string"},
+                        "evidence_text": bounded_text(500),
                     },
                 },
             },
@@ -116,7 +119,7 @@ def build_json_schema(source_ids):
                     "Conflicting Evidence/Cherrypicking",
                 ],
             },
-            "verdict_justification": {"type": "string"},
+            "verdict_justification": bounded_text(650),
         },
     }
 
@@ -242,6 +245,12 @@ def main():
         few_shot_examples = [generator.reference_corpus[i] for i in top_n]
         system_prompt = generator.format_system_prompt(
             retrieval, few_shot_examples, datapoint.speaker, datapoint.claim_date
+        )
+        system_prompt += (
+            "\n\nLength limits: reasoning must be concise, at most 120 words. "
+            "Return at most 3 questions. Each question must be under 25 words. "
+            "Each answer and evidence_text must be under 60 words. "
+            "verdict_justification must be under 80 words. Output JSON only."
         )
         user_content = [{"type": "text", "text": datapoint.claim}]
         prepared.append((datapoint, retrieval, system_prompt, user_content))
