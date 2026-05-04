@@ -373,7 +373,7 @@ class GptBatchedEvidenceGenerator(GptEvidenceGenerator):
             "method": "POST",
             "url": "/v1/chat/completions",
             "body": {
-                "model": "gpt-4o",
+                "model": self.client.model,
                 # "model": "gpt-3.5-turbo-0125",
                 "messages": [
                     {"role": "system", "content": system_prompt},
@@ -640,7 +640,7 @@ class DynamicFewShotBatchedEvidenceGenerator(GptBatchedEvidenceGenerator):
                 "method": "POST",
                 "url": "/v1/chat/completions",
                 "body": {
-                    "model": "gpt-5.1",
+                    "model": self.client.model,
                     "messages": [
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_message_content},
