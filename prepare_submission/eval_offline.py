@@ -30,6 +30,33 @@ def load_json(path):
     return data
 
 
+def is_placeholder_prediction(pred):
+    return (
+        not (pred.get("questions") or [])
+        and not (pred.get("evidence") or [])
+        and not (pred.get("justification") or "").strip()
+    )
+
+
+def zero_eval_result(note):
+    return {
+        "ques_score": 0.0,
+        "evid_score": 0.0,
+        "verdict_score": 0.0,
+        "justi_score": 0.0,
+        "intermediate_info": {
+            "note": note,
+            "ques_feedback": None,
+            "ques_score": [],
+            "justi_feedback": None,
+            "justi_score": [],
+            "evid_feedback": [],
+            "evid_image_score": [],
+            "evid_text_score": [],
+        },
+    }
+
+
 import re
 
 if __name__ == "__main__":
@@ -145,25 +172,38 @@ if __name__ == "__main__":
         pred_questions = pred_file[i]["questions"]
         pred_verdict = pred_file[i]["verdict"]
 
+        if is_placeholder_prediction(pred_file[i]):
+            all_eval_results.append(zero_eval_result("empty prediction row"))
+            continue
+
         # verdict prediction
         if pred_verdict.lower().strip() == gt_verdict.lower():
             verdict_acc = 1.0
         else:
             verdict_acc = 0.0
         # evidence evaluation
-        detailed_evid_val, evid_val_score = val_evid_idv(mllm, mllm_name, pred_evid, gt_evid, False, True)
-        img_scores = compute_image_scores(mllm, mllm_name, pred_evid, gt_evid, evid_val_score)
-        _, evid_acc, _ = utils.get_auto_recall(detailed_evid_val, img_scores, len(gt_evid), len(pred_evid))
+        if pred_evid:
+            detailed_evid_val, evid_val_score = val_evid_idv(mllm, mllm_name, pred_evid, gt_evid, False, True)
+            img_scores = compute_image_scores(mllm, mllm_name, pred_evid, gt_evid, evid_val_score)
+            _, evid_acc, _ = utils.get_auto_recall(detailed_evid_val, img_scores, len(gt_evid), len(pred_evid))
+        else:
+            detailed_evid_val, evid_val_score, img_scores, evid_acc = [], [], [], 0.0
         # justification generation
-        justi_feedback, justi_score = textual_val_single(
-            gt_justification, pred_justi, args.root_dir, mllm_name, mllm, "justification", args.debug
-        )
-        justi_acc = utils.justi_recall_compute(justi_feedback, justi_score)
+        if pred_justi.strip():
+            justi_feedback, justi_score = textual_val_single(
+                gt_justification, pred_justi, args.root_dir, mllm_name, mllm, "justification", args.debug
+            )
+            justi_acc = utils.justi_recall_compute(justi_feedback, justi_score)
+        else:
+            justi_feedback, justi_score, justi_acc = None, [], 0.0
         # question generation
-        ques_feedback, ques_score = textual_val_single(
-            gt_questions, pred_questions, args.root_dir, mllm_name, mllm, "question", args.debug
-        )
-        ques_acc = utils.ques_recall_compute(ques_score, len(gt_questions), len(pred_questions))
+        if pred_questions:
+            ques_feedback, ques_score = textual_val_single(
+                gt_questions, pred_questions, args.root_dir, mllm_name, mllm, "question", args.debug
+            )
+            ques_acc = utils.ques_recall_compute(ques_score, len(gt_questions), len(pred_questions))
+        else:
+            ques_feedback, ques_score, ques_acc = None, [], 0.0
         if args.debug:
             print("##Question:\n", ques_feedback, "\n", ques_score, "\n\t", ques_acc)
             print("##Verdict:\n", pred_verdict, gt_verdict, verdict_acc)
