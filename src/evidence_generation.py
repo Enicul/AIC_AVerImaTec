@@ -16,6 +16,7 @@ from rank_bm25 import BM25Okapi
 import nltk
 import base64
 import requests
+import re
 
 MEM = {}
 IMAGE_BASE_URL = f"https://fcheck.fel.cvut.cz/images/averimatec"
@@ -139,10 +140,35 @@ class EvidenceGenerator:
             if "```" in message:
                 message = message.split("```")[0]
             result = message.replace("```json", "").replace("```", "")
-            return dirtyjson.loads(result)
+            return cls.normalise_output_keys(dirtyjson.loads(result))
         except:
             print("Error parsing JSON for EvidenceGenerator.\n", message)
             return []
+
+    @classmethod
+    def normalise_output_keys(cls, data):
+        key_map = {
+            "reasoning": "reasoning",
+            "questions": "questions",
+            "question": "question",
+            "answer": "answer",
+            "source": "source",
+            "answertype": "answer_type",
+            "evidencetext": "evidence_text",
+            "claimveracity": "claim_veracity",
+            "veracityverdict": "veracity_verdict",
+            "verdictjustification": "verdict_justification",
+        }
+        if isinstance(data, list):
+            return [cls.normalise_output_keys(item) for item in data]
+        if not isinstance(data, dict):
+            return data
+
+        normalised = {}
+        for key, value in data.items():
+            compact_key = re.sub(r"[\s_-]+", "", str(key).lower())
+            normalised[key_map.get(compact_key, key)] = cls.normalise_output_keys(value)
+        return normalised
 
     @classmethod
     def pop_reasoning(cls, data):
@@ -453,6 +479,7 @@ class GptBatchedEvidenceGenerator(GptEvidenceGenerator):
         self.last_llm_output = gpt_result
         gpt_data = self.parse_json(gpt_result)
         try:
+            justification = ""
             reasoning = self.pop_reasoning(gpt_data)
             label_confidences = self.parse_label_probabilities(gpt_data["claim_veracity"])
             if "veracity_verdict" in gpt_data:
