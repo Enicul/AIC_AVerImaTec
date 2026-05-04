@@ -297,7 +297,12 @@ class DynamicFewShotEvidenceGenerator(GptEvidenceGenerator):
         client: SimpleJSONChat = None,
         reference_corpus_path=None,
         k=10,
+        include_claim_images=True,
+        max_source_chars=None,
     ):
+        self.include_claim_images = include_claim_images
+        self.max_source_chars = max_source_chars
+
         if reference_corpus_path is None:
             self.reference_corpus = []
             self.bm25 = None
@@ -323,11 +328,20 @@ class DynamicFewShotEvidenceGenerator(GptEvidenceGenerator):
         super().__init__(model, client)
 
     def format_system_prompt(self, retrieval_result: RetrievalResult, few_shot_examples) -> str:
+        max_source_chars = self.max_source_chars
+
+        def truncate_source(text):
+            if max_source_chars is None or len(text) <= max_source_chars:
+                return text
+            return text[:max_source_chars].rsplit(" ", 1)[0] + "..."
+
         # alternative for not outputing 10 every time - maybe better for classfiers (not problem now): (There is no need to output all 10 questions if you know that the questions contain all necessary information for fact-checking of the claim)
         result = "You are a professional fact checker, formulate up to 10 questions that cover all the facts needed to validate whether the factual statement (in User message) is true, false, uncertain or a matter of opinion.\nAfter formulating Your questions and their answers using the provided sources, You evaluate the possible veracity verdicts (Supported claim, Refuted claim, Not enough evidence, or Conflicting evidence/Cherrypicking) given your claim and evidence on a Likert scale (1 - Strongly disagree, 2 - Disagree, 3 - Neutral, 4 - Agree, 5 - Strongly agree).\nThe facts must be coming from these sources, please refer them using assigned IDs:"
         for i, e in enumerate(retrieval_result):
             result += f"\n---\n## Source ID: {i+1} ({e.metadata['url']})\n"
-            result += "\n".join([e.metadata["context_before"], e.page_content, e.metadata["context_after"]])
+            result += truncate_source(
+                "\n".join([e.metadata["context_before"], e.page_content, e.metadata["context_after"]])
+            )
         result += """\n---\n## Output formatting\nPlease, you MUST only print the output in the following output format:
 ```json
 {
@@ -546,8 +560,12 @@ class DynamicFewShotBatchedEvidenceGenerator(GptBatchedEvidenceGenerator):
         reference_corpus_path=None,
         k=10,
         images_dir=None,
+        include_claim_images=True,
+        max_source_chars=None,
     ):
         self.images_dir = images_dir
+        self.include_claim_images = include_claim_images
+        self.max_source_chars = max_source_chars
 
         if reference_corpus_path is None:
             self.reference_corpus = []
@@ -577,6 +595,13 @@ class DynamicFewShotBatchedEvidenceGenerator(GptBatchedEvidenceGenerator):
         self, retrieval_result: RetrievalResult, few_shot_examples, author=None, date=None, medium=None
     ) -> str:
         k = len(retrieval_result)
+        max_source_chars = self.max_source_chars
+
+        def truncate_source(text):
+            if max_source_chars is None or len(text) <= max_source_chars:
+                return text
+            return text[:max_source_chars].rsplit(" ", 1)[0] + "..."
+
         # alternative for not outputing 10 every time - maybe better for classfiers (not problem now): (There is no need to output all 10 questions if you know that the questions contain all necessary information for fact-checking of the claim)
         result = "You are a professional fact checker of image-text claims, formulate up to 10 questions that cover all the facts needed to validate whether the factual statement (in User message) is true, false, uncertain or a matter of opinion. "
         result += (
@@ -600,7 +625,9 @@ class DynamicFewShotBatchedEvidenceGenerator(GptBatchedEvidenceGenerator):
             result += " sources 11-19 were retrieved for the user image. You may therefore assume that each of the image-based sources was published alongside a picture similar to the user image. "
         for i, e in enumerate(retrieval_result):
             result += f"\n---\n## Source ID: {i+1} ({e.metadata['url']})\n"
-            result += "\n".join([e.metadata["context_before"], e.page_content, e.metadata["context_after"]])
+            result += truncate_source(
+                "\n".join([e.metadata["context_before"], e.page_content, e.metadata["context_after"]])
+            )
         for i, image_sources in enumerate(retrieval_result.images):
             for j, image_source in enumerate(image_sources):
                 result += f"\n---\n## Image Source ID: {j + 1 + (i+1)*10} (related to user image {i+1}, "
@@ -611,7 +638,7 @@ class DynamicFewShotBatchedEvidenceGenerator(GptBatchedEvidenceGenerator):
                     f"image url: {image_source.get('imageUrl', '')})\n"
                 )
                 if image_source.get("content"):
-                    result += image_source["content"]
+                    result += truncate_source(image_source["content"])
         result += """\n---\n## Output formatting\nPlease, you MUST only print the output in the following output format:
 ```json
 {
@@ -675,17 +702,18 @@ class DynamicFewShotBatchedEvidenceGenerator(GptBatchedEvidenceGenerator):
         ]
 
         images_dir = getattr(self, "images_dir", None) or os.environ.get("IMAGES_DIR", "")
-        for i, img in enumerate(datapoint.claim_images):
-            img_path = os.path.join(images_dir, img) if images_dir else img
-            base64_image = filesystem_base64(img_path)
-            user_message_content.append(
-                {
-                    "type": "image_url",
-                    "image_url": {
-                        "url": f"data:image/jpeg;base64,{base64_image}",
-                    },
-                }
-            )
+        if self.include_claim_images:
+            for i, img in enumerate(datapoint.claim_images):
+                img_path = os.path.join(images_dir, img) if images_dir else img
+                base64_image = filesystem_base64(img_path)
+                user_message_content.append(
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/jpeg;base64,{base64_image}",
+                        },
+                    }
+                )
 
         # call gpt
         self.batch.append(

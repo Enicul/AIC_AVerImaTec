@@ -103,6 +103,18 @@ def parse_args():
         help="Directory containing claim images. Falls back to IMAGES_DIR env var.",
     )
     parser.add_argument(
+        "--no_claim_images",
+        action="store_true",
+        default=False,
+        help="Do not attach raw claim images to the LLM user message.",
+    )
+    parser.add_argument(
+        "--max_source_chars",
+        type=int,
+        default=None,
+        help="Maximum characters per retrieved text/image source included in the prompt.",
+    )
+    parser.add_argument(
         "--k",
         type=int,
         default=9,
@@ -152,6 +164,8 @@ def main():
     evidence_generator = DynamicFewShotEvidenceGenerator(
         model=args.llm_name,
         reference_corpus_path=args.reference_corpus_path,
+        include_claim_images=not args.no_claim_images,
+        max_source_chars=args.max_source_chars,
     )
 
     # Build classifier (DefaultClassifier reads verdict from evidence generator metadata)
