@@ -28,6 +28,16 @@ def parse_args():
         "--model_path",
         default="/home/aied_test/models/Qwen2.5-VL-7B-Instruct",
     )
+    parser.add_argument(
+        "--base_model_path",
+        default="/home/aied_test/models/Qwen2.5-VL-7B-Instruct",
+        help="Base Qwen2.5-VL path used when --model_path points to a LoRA adapter.",
+    )
+    parser.add_argument(
+        "--lora_path",
+        default=None,
+        help="Optional PEFT LoRA adapter path to merge onto --base_model_path.",
+    )
     parser.add_argument("--model_id", default="Qwen/Qwen2.5-VL-7B-Instruct")
     parser.add_argument(
         "--vector_store_path",
@@ -132,6 +142,31 @@ def source_ids_for_retrieval(retrieval):
     return source_ids or ["1"]
 
 
+def is_lora_adapter(path):
+    return path and (Path(path) / "adapter_config.json").exists()
+
+
+def load_qwen_model_and_processor(args):
+    processor_path = args.base_model_path if args.lora_path or is_lora_adapter(args.model_path) else args.model_path
+    model_path = args.base_model_path if args.lora_path or is_lora_adapter(args.model_path) else args.model_path
+    lora_path = args.lora_path or (args.model_path if is_lora_adapter(args.model_path) else None)
+
+    processor = AutoProcessor.from_pretrained(
+        processor_path, min_pixels=64 * 28 * 28, max_pixels=64 * 28 * 28
+    )
+    model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
+        model_path, torch_dtype=torch.bfloat16, device_map={"": "cuda:0"}
+    )
+    if lora_path:
+        from peft import PeftModel
+
+        print("loading_lora_adapter=", lora_path, flush=True)
+        model = PeftModel.from_pretrained(model, lora_path)
+        model = model.merge_and_unload()
+    model.eval()
+    return model, processor
+
+
 def load_datapoints(root, split, limit):
     from averitec import Datapoint
 
@@ -216,6 +251,9 @@ def main():
     print("constrained=", args.constrained, flush=True)
     print("include_claim_images=", args.include_claim_images, flush=True)
     print("max_source_chars=", args.max_source_chars, flush=True)
+    print("model_path=", args.model_path, flush=True)
+    print("base_model_path=", args.base_model_path, flush=True)
+    print("lora_path=", args.lora_path, flush=True)
 
     datapoints = load_datapoints(args.root, args.split, args.limit)
     embeddings = HuggingFaceEmbeddings(
@@ -269,13 +307,7 @@ def main():
     )
 
     print("loading_qwen...", flush=True)
-    processor = AutoProcessor.from_pretrained(
-        args.model_path, min_pixels=64 * 28 * 28, max_pixels=64 * 28 * 28
-    )
-    model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
-        args.model_path, torch_dtype=torch.bfloat16, device_map={"": "cuda:0"}
-    )
-    model.eval()
+    model, processor = load_qwen_model_and_processor(args)
     print("qwen_loaded_device=", model.device, flush=True)
 
     records = []
