@@ -5,3 +5,4 @@ logs
 **/.ipynb_checkpoints/
 prepare_submission/private_info/**
 private_info/**
+src/private_info/**
