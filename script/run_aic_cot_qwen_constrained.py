@@ -6,6 +6,7 @@ import os
 import pickle
 import sys
 import traceback
+import types
 from pathlib import Path
 
 import nltk
@@ -23,6 +24,8 @@ def parse_args():
     parser.add_argument("--root", type=Path, default=ROOT_DEFAULT)
     parser.add_argument("--split", default="val")
     parser.add_argument("--limit", type=int, default=None)
+    parser.add_argument("--start", type=int, default=0, help="Inclusive start index for sharded runs.")
+    parser.add_argument("--end", type=int, default=None, help="Exclusive end index for sharded runs.")
     parser.add_argument("--output_dir", type=Path, required=True)
     parser.add_argument(
         "--model_path",
@@ -37,6 +40,19 @@ def parse_args():
         "--lora_path",
         default=None,
         help="Optional PEFT LoRA adapter path to merge onto --base_model_path.",
+    )
+    parser.add_argument(
+        "--ffn_suppression_strength",
+        type=float,
+        default=1.0,
+        help="Runtime ParamMute language-MLP scaling strength. 1.0 disables suppression.",
+    )
+    parser.add_argument(
+        "--ffn_suppression_layers",
+        type=int,
+        nargs="*",
+        default=[],
+        help="Language decoder layer indices whose MLP outputs are scaled at runtime.",
     )
     parser.add_argument("--model_id", default="Qwen/Qwen2.5-VL-7B-Instruct")
     parser.add_argument(
@@ -146,6 +162,47 @@ def is_lora_adapter(path):
     return path and (Path(path) / "adapter_config.json").exists()
 
 
+def apply_language_ffn_suppression(model, strength, layers):
+    if strength >= 1.0 or not layers:
+        print(
+            f"ffn_suppression_disabled strength={strength} layers={layers}",
+            flush=True,
+        )
+        return model
+
+    target_layers = {int(layer) for layer in layers}
+    patched = []
+    for name, module in model.named_modules():
+        parts = name.split(".")
+        if "visual" in name:
+            continue
+        if len(parts) < 2 or parts[-1] != "mlp" or not parts[-2].isdigit():
+            continue
+        layer_idx = int(parts[-2])
+        if layer_idx not in target_layers:
+            continue
+
+        orig_forward = module.forward
+
+        def make_patched(orig, scale):
+            def patched_forward(*args, **kwargs):
+                return orig(*args, **kwargs) * scale
+            return patched_forward
+
+        module.forward = types.MethodType(
+            lambda self, *args, _f=make_patched(orig_forward, strength), **kwargs: _f(*args, **kwargs),
+            module,
+        )
+        patched.append(f"{name} (layer {layer_idx})")
+
+    if not patched:
+        raise RuntimeError(
+            f"No language MLP modules found for suppression layers {sorted(target_layers)}"
+        )
+    print(f"parammute_runtime_suppression strength={strength} patched={patched}", flush=True)
+    return model
+
+
 def load_qwen_model_and_processor(args):
     processor_path = args.base_model_path if args.lora_path or is_lora_adapter(args.model_path) else args.model_path
     model_path = args.base_model_path if args.lora_path or is_lora_adapter(args.model_path) else args.model_path
@@ -157,6 +214,9 @@ def load_qwen_model_and_processor(args):
     model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
         model_path, torch_dtype=torch.bfloat16, device_map={"": "cuda:0"}
     )
+    model = apply_language_ffn_suppression(
+        model, args.ffn_suppression_strength, args.ffn_suppression_layers
+    )
     if lora_path:
         from peft import PeftModel
 
@@ -167,15 +227,19 @@ def load_qwen_model_and_processor(args):
     return model, processor
 
 
-def load_datapoints(root, split, limit):
+def load_datapoints(root, split, limit, start=0, end=None):
     from averitec import Datapoint
 
     data_path = root / "data" / "data_clean" / "split_data" / f"{split}.json"
     raw = json.load(open(data_path))
+    if end is None:
+        end = len(raw)
+    raw = raw[start:end]
     if limit is not None:
         raw = raw[:limit]
     datapoints = []
-    for i, item in enumerate(raw):
+    for offset, item in enumerate(raw):
+        i = start + offset
         item = dict(item)
         item.setdefault("claim_id", i)
         item.setdefault("split", split)
@@ -251,11 +315,15 @@ def main():
     print("constrained=", args.constrained, flush=True)
     print("include_claim_images=", args.include_claim_images, flush=True)
     print("max_source_chars=", args.max_source_chars, flush=True)
+    print("shard_start=", args.start, flush=True)
+    print("shard_end=", args.end, flush=True)
     print("model_path=", args.model_path, flush=True)
     print("base_model_path=", args.base_model_path, flush=True)
     print("lora_path=", args.lora_path, flush=True)
+    print("ffn_suppression_strength=", args.ffn_suppression_strength, flush=True)
+    print("ffn_suppression_layers=", args.ffn_suppression_layers, flush=True)
 
-    datapoints = load_datapoints(args.root, args.split, args.limit)
+    datapoints = load_datapoints(args.root, args.split, args.limit, args.start, args.end)
     embeddings = HuggingFaceEmbeddings(
         model_name="mixedbread-ai/mxbai-embed-large-v1",
         model_kwargs={"device": "cpu"},

@@ -59,6 +59,175 @@ def zero_eval_result(note):
 
 import re
 
+
+
+
+
+
+class _OpenRouterGenerateContentResponse:
+    def __init__(self, payload):
+        self.payload = payload
+        self.text = (((payload.get("choices") or [{}])[0].get("message") or {}).get("content") or "").strip()
+
+
+class _OpenRouterGenerateContentModels:
+    def __init__(self, api_key, model_name="google/gemini-2.5-flash", timeout=180):
+        self.api_key = api_key
+        self.model_name = model_name
+        self.timeout = timeout
+        self.endpoint = "https://openrouter.ai/api/v1/chat/completions"
+        self.referer = os.environ.get("OPENROUTER_HTTP_REFERER", "https://localhost")
+        self.title = os.environ.get("OPENROUTER_X_TITLE", "AVerImaTeC evaluation")
+
+    def _image_data_url(self, image):
+        import base64, io
+        buf = io.BytesIO()
+        image.save(buf, format="PNG")
+        return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+
+    def _message_content(self, contents):
+        if isinstance(contents, list):
+            parts = []
+            for item in contents:
+                if isinstance(item, str):
+                    parts.append({"type": "text", "text": item})
+                else:
+                    try:
+                        from PIL import Image
+                        if isinstance(item, Image.Image):
+                            parts.append({"type": "image_url", "image_url": {"url": self._image_data_url(item)}})
+                            continue
+                    except Exception:
+                        pass
+                    parts.append({"type": "text", "text": str(item)})
+            return parts
+        return str(contents)
+
+    def generate_content(self, model=None, contents=None):
+        import random, time, requests
+        payload = {"model": self.model_name, "messages": [{"role": "user", "content": self._message_content(contents)}]}
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": self.referer,
+            "X-Title": self.title,
+        }
+        last_err = None
+        for attempt in range(8):
+            resp = requests.post(self.endpoint, headers=headers, json=payload, timeout=self.timeout)
+            if resp.status_code in (429, 500, 502, 503, 504):
+                last_err = RuntimeError(f"openrouter HTTP {resp.status_code}: {resp.text[:500]}")
+                retry_after = resp.headers.get("retry-after")
+                wait = min(120, (2 ** attempt) + random.random())
+                if retry_after:
+                    try: wait = max(wait, float(retry_after))
+                    except ValueError: pass
+                time.sleep(wait)
+                continue
+            resp.raise_for_status()
+            return _OpenRouterGenerateContentResponse(resp.json())
+        raise last_err
+
+
+class OpenRouterGenerateContentClient:
+    def __init__(self, api_key, model_name="google/gemini-2.5-flash"):
+        self.models = _OpenRouterGenerateContentModels(api_key, model_name)
+
+class _RateLimitedModels:
+    def __init__(self, models, min_interval_seconds):
+        self._models = models
+        self._min_interval_seconds = float(min_interval_seconds or 0)
+        self._last_call = 0.0
+
+    def generate_content(self, *args, **kwargs):
+        import time
+        if self._min_interval_seconds > 0:
+            now = time.time()
+            wait = self._min_interval_seconds - (now - self._last_call)
+            if wait > 0:
+                time.sleep(wait)
+        result = self._models.generate_content(*args, **kwargs)
+        self._last_call = time.time()
+        return result
+
+
+class _RateLimitedClient:
+    def __init__(self, client, min_interval_seconds):
+        self._client = client
+        self.models = _RateLimitedModels(client.models, min_interval_seconds)
+
+
+def apply_genai_rate_limit(client):
+    interval = os.environ.get("GENAI_MIN_INTERVAL_SECONDS")
+    if interval and hasattr(client, "models"):
+        return _RateLimitedClient(client, float(interval))
+    return client
+
+class _CustomGenerateContentResponse:
+    def __init__(self, payload):
+        self.payload = payload
+        self.text = self._extract_text(payload)
+
+    @staticmethod
+    def _extract_text(payload):
+        parts = []
+        for cand in payload.get("candidates", []) or []:
+            content = cand.get("content", {}) or {}
+            for part in content.get("parts", []) or []:
+                if "text" in part:
+                    parts.append(part.get("text") or "")
+        return "\n".join(parts).strip()
+
+
+class _CustomGenerateContentModels:
+    def __init__(self, endpoint, api_key, timeout=120):
+        self.endpoint = endpoint
+        self.api_key = api_key
+        self.timeout = timeout
+
+    def _part(self, item):
+        if isinstance(item, str):
+            return {"text": item}
+        try:
+            from PIL import Image
+            if isinstance(item, Image.Image):
+                import base64, io
+                buf = io.BytesIO()
+                item.save(buf, format="PNG")
+                return {"inlineData": {"mimeType": "image/png", "data": base64.b64encode(buf.getvalue()).decode("ascii")}}
+        except Exception:
+            pass
+        return {"text": str(item)}
+
+    def generate_content(self, model=None, contents=None):
+        import os, random, time, requests
+        if isinstance(contents, list):
+            parts = [self._part(x) for x in contents]
+        else:
+            parts = [self._part(contents)]
+        payload = {"contents": [{"role": "user", "parts": parts}]}
+        headers = {"Content-Type": "application/json", "api-key": self.api_key}
+        last_err = None
+        for attempt in range(8):
+            resp = requests.post(self.endpoint, headers=headers, json=payload, timeout=self.timeout, verify=(os.environ.get("GENAI_VERIFY_SSL", "true").lower() not in {"0", "false", "no"}))
+            if resp.status_code in (429, 500, 502, 503, 504):
+                last_err = RuntimeError(f"custom genai HTTP {resp.status_code}: {resp.text[:500]}")
+                wait = min(90, (2 ** attempt) + random.random())
+                retry_after = resp.headers.get("retry-after")
+                if retry_after:
+                    try: wait = max(wait, float(retry_after))
+                    except ValueError: pass
+                time.sleep(wait)
+                continue
+            resp.raise_for_status()
+            return _CustomGenerateContentResponse(resp.json())
+        raise last_err
+
+
+class CustomGenerateContentClient:
+    def __init__(self, endpoint, api_key):
+        self.models = _CustomGenerateContentModels(endpoint, api_key)
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Generate extra questions based on claims with a prompt. Useful for searching."
@@ -85,17 +254,36 @@ if __name__ == "__main__":
     Potential issues related to Gemma: https://github.com/google-deepmind/gemma/issues/169
     """
     mllm_name = args.eval_model
-    from transformers import AutoProcessor, Gemma3ForConditionalGeneration
+    if "gemini" in mllm_name:
+        openrouter_key = os.environ.get("OPENROUTER_API_KEY")
+        custom_endpoint = os.environ.get("GENAI_ENDPOINT")
+        custom_key = os.environ.get("GENAI_SUBSCRIPTION_KEY")
+        if openrouter_key:
+            mllm = apply_genai_rate_limit(OpenRouterGenerateContentClient(openrouter_key, mllm_name))
+        elif custom_endpoint and custom_key:
+            mllm = apply_genai_rate_limit(CustomGenerateContentClient(custom_endpoint, custom_key))
+        else:
+            from google import genai
+            from google.genai.types import HttpOptions
 
-    model = Gemma3ForConditionalGeneration.from_pretrained(
-        mllm_name,
-        device_map="auto",
-        torch_dtype=torch.bfloat16,
-        cache_dir=args.cache_dir,
-        # attn_implementation="eager"
-    )
-    processor = AutoProcessor.from_pretrained(mllm_name, cache_dir=args.cache_dir)
-    mllm = {"model": model.eval(), "processor": processor}
+            api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+            if not api_key:
+                raise ValueError("Set GEMINI_API_KEY/GOOGLE_API_KEY or GENAI_ENDPOINT+GENAI_SUBSCRIPTION_KEY for Gemini evaluation")
+            mllm = apply_genai_rate_limit(genai.Client(http_options=HttpOptions(api_version="v1"), api_key=api_key))
+    elif "gemma" in mllm_name:
+        from transformers import AutoProcessor, Gemma3ForConditionalGeneration
+
+        model = Gemma3ForConditionalGeneration.from_pretrained(
+            mllm_name,
+            device_map="auto",
+            torch_dtype=torch.bfloat16,
+            cache_dir=args.cache_dir,
+            # attn_implementation="eager"
+        )
+        processor = AutoProcessor.from_pretrained(mllm_name, cache_dir=args.cache_dir)
+        mllm = {"model": model.eval(), "processor": processor}
+    else:
+        raise ValueError(f"Unsupported eval_model: {mllm_name}")
 
     print("Root dir:", args.root_dir)
     # p2_data = load_json(os.path.join(args.root_dir, "data/data_clean/split_data/test.json"))
@@ -226,6 +414,17 @@ if __name__ == "__main__":
                     "evid_text_score": evid_val_score,
                 },
             }
+        )
+        json.dump(
+            all_eval_results,
+            open(
+                os.path.join(
+                    args.root_dir,
+                    "prepare_submission/intermediate_eval_results",
+                    "_".join([args.llm_name, args.mllm_name, str(args.save_num)]) + ".json",
+                ),
+                "w",
+            ),
         )
 
     json.dump(

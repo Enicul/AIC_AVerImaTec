@@ -14,6 +14,38 @@ import random
 import pycountry
 import torch
 import transformers
+import types
+
+
+
+def apply_language_ffn_suppression(model, strength, layers):
+    if strength >= 1.0 or not layers:
+        print(f"Runtime FFN suppression disabled: strength={strength}, layers={layers}", flush=True)
+        return model
+    target_layers = {int(layer) for layer in layers}
+    patched = []
+    for name, module in model.named_modules():
+        if "visual" in name:
+            continue
+        parts = name.split(".")
+        if len(parts) < 2 or parts[-1] != "mlp" or not parts[-2].isdigit():
+            continue
+        layer_idx = int(parts[-2])
+        if layer_idx not in target_layers:
+            continue
+        original_forward = module.forward
+
+        def make_patched_forward(forward_fn, scale):
+            def patched_forward(*args, **kwargs):
+                return forward_fn(*args, **kwargs) * scale
+            return patched_forward
+
+        module.forward = make_patched_forward(original_forward, strength)
+        patched.append(f"{name} (layer {layer_idx})")
+    if not patched:
+        raise RuntimeError(f"No language MLP modules matched layers={sorted(target_layers)}")
+    print(f"Runtime FFN suppression strength={strength}, patched={patched}", flush=True)
+    return model
 
 
 def load_pkl(path):
@@ -349,9 +381,13 @@ if __name__ == "__main__":
                 base_model_path, min_pixels=min_pixels, max_pixels=max_pixels
             )
 
-            need_supp = args.LORA_PATH is not None and any([
+            runtime_suppression = (
+                args.FFN_SUPPRESSION_STRENGTH < 1.0 and len(args.FFN_SUPPRESSION_LAYERS) > 0
+            )
+            step_suppression = any([
                 args.SUPP_QG, args.SUPP_VQA, args.SUPP_VERDICT, args.SUPP_JUSTI
             ])
+            need_supp = (args.LORA_PATH is not None or runtime_suppression) and step_suppression
             need_base = not all([args.SUPP_QG, args.SUPP_VQA, args.SUPP_VERDICT, args.SUPP_JUSTI])
 
             if need_base or not need_supp:
@@ -363,13 +399,25 @@ if __name__ == "__main__":
                 base_model = None
 
             if need_supp:
-                from peft import PeftModel
-                print(f"Loading suppressed (LoRA) model from {args.LORA_PATH}")
+                print(
+                    f"Loading suppressed model: lora={args.LORA_PATH}, "
+                    f"ffn_strength={args.FFN_SUPPRESSION_STRENGTH}, "
+                    f"ffn_layers={args.FFN_SUPPRESSION_LAYERS}",
+                    flush=True,
+                )
                 supp_model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
                     base_model_path, torch_dtype=torch.bfloat16, device_map={"": "cuda:0"},
                 )
-                supp_model = PeftModel.from_pretrained(supp_model, args.LORA_PATH)
-                supp_model = supp_model.merge_and_unload()
+                if args.LORA_PATH is not None:
+                    from peft import PeftModel
+                    supp_model = PeftModel.from_pretrained(supp_model, args.LORA_PATH)
+                    supp_model = supp_model.merge_and_unload()
+                if runtime_suppression:
+                    supp_model = apply_language_ffn_suppression(
+                        supp_model,
+                        args.FFN_SUPPRESSION_STRENGTH,
+                        args.FFN_SUPPRESSION_LAYERS,
+                    )
                 supp_model.train(False)
             else:
                 supp_model = base_model

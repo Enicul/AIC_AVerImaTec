@@ -47,5 +47,7 @@ def parse_opt():
     parser.add_argument("--SUPP_VQA", type=bool, default=False)      # suppress MLLM at visual QA (Tool B)
     parser.add_argument("--SUPP_VERDICT", type=bool, default=False)  # suppress MLLM at verdict prediction
     parser.add_argument("--SUPP_JUSTI", type=bool, default=False)    # suppress MLLM at justification+summary
+    parser.add_argument("--FFN_SUPPRESSION_STRENGTH", type=float, default=1.0)
+    parser.add_argument("--FFN_SUPPRESSION_LAYERS", type=int, nargs="*", default=[])
     args = parser.parse_args()
     return args

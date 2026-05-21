@@ -76,7 +76,7 @@ def seperate_text_val(
         from private_info import API_keys
         from google.genai.types import HttpOptions
 
-        model = genai.Client(http_options=HttpOptions(api_version="v1"), api_key=API_keys.GEMINI_API_KEY)
+        model = genai.Client(http_options=HttpOptions(api_version="v1"), api_key=os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or API_keys.GEMINI_API_KEY)
     elif "gemma" in eval_name:
         import torch
         from transformers import AutoProcessor, Gemma3ForConditionalGeneration
@@ -107,8 +107,7 @@ def seperate_text_val(
         incontext_input = gen_incontext_input_textonly(pred, ref, demonstrations)
         if "gemini" in eval_name:
             response = model.models.generate_content(
-                # model='gemini-2.5-pro-exp-03-25',
-                model="gemini-2.0-flash-001",
+                model=eval_name,
                 contents=incontext_input,
             )
             feedback = response.text
@@ -209,7 +208,7 @@ def val_evid_idv(model, model_name, pred_evid, ref_evid, text_val, seperate_val)
         else:
             incontext_input = gen_incontext_input_textonly(pred, ref, text_val_demo)
         if "gemini" in model_name:
-            response = model.models.generate_content(model="gemini-2.0-flash-001", contents=incontext_input)
+            response = model.models.generate_content(model=model_name, contents=incontext_input)
             feedback = response.text
         elif "gemma" in model_name:
             messages = [{"role": "user", "content": [{"type": "text", "text": incontext_input}]}]
@@ -234,7 +233,7 @@ def val_evid_idv(model, model_name, pred_evid, ref_evid, text_val, seperate_val)
         inputs.extend(ref_split)
         inputs.extend(pred_split)
         if "gemini" in model_name:
-            response = model.models.generate_content(model="gemini-2.0-flash-001", contents=inputs)
+            response = model.models.generate_content(model=model_name, contents=inputs)
             feedback = response.text
     processed_score = score_extraction(feedback)
     return feedback, processed_score
@@ -268,7 +267,7 @@ def compute_image_scores(model, model_name, pred_evid, ref_evid, score):
                     for img in imgs_ref:
                         inputs.append(Image.open(img).convert("RGB"))
                     inputs.append("\nPlease generate your rating with one integer:")
-                    response = model.models.generate_content(model="gemini-2.0-flash-001", contents=inputs)
+                    response = model.models.generate_content(model=model_name, contents=inputs)
                     feedback = response.text
                 elif "gemma" in model_name:
                     messages = [
@@ -327,7 +326,7 @@ def compute_image_scores(model, model_name, pred_evid, ref_evid, score):
                     for img in imgs_ref:
                         inputs.append(Image.open(img).convert("RGB"))
                     inputs.append("\nPlease generate your rating with one integer:")
-                    response = model.models.generate_content(model="gemini-2.0-flash-001", contents=inputs)
+                    response = model.models.generate_content(model=model_name, contents=inputs)
                     feedback = response.text
                 elif "gemma" in model_name:
                     messages = [
@@ -384,8 +383,7 @@ def textual_val_single(ref, pred, path, eval_name, model, eval_type="", debug_mo
     incontext_input = gen_incontext_input_textonly(pred, ref, val_demo)
     if "gemini" in eval_name:
         response = model.models.generate_content(
-            # model='gemini-2.5-pro-exp-03-25',
-            model="gemini-2.0-flash-001",
+            model=eval_name,
             contents=incontext_input,
         )
         feedback = response.text
