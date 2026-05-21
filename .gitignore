@@ -2,5 +2,6 @@
 logs/*
 logs
 **/__pycache__/
+**/.ipynb_checkpoints/
 prepare_submission/private_info/**
 private_info/**
